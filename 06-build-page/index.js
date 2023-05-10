@@ -2,71 +2,77 @@ const fs = require('fs');
 const path = require('path');
 const fsp = require('fs/promises');
 
-fs.mkdir(path.join(__dirname, 'project-dist'), {recursive: true}, (err) => {
-  if (err) console.log(err);
-})
-
-fs.mkdir(path.join(__dirname, 'project-dist', 'assets'), {recursive: true}, (err) => {
-  if (err) console.log(err);
-})
+async function createFolders() {
+  await fsp.mkdir(path.join(__dirname, 'project-dist'), {recursive: true}).catch((err) => {
+    if (err) console.log(err);
+  })
+  await fsp.mkdir(path.join(__dirname, 'project-dist', 'assets'), {recursive: true}).catch((err) => {
+    if (err) console.log(err);
+  });
+}
 
 let currentDir = path.join(__dirname, 'assets');
 let cloneDir = path.join(__dirname, 'project-dist', 'assets');
 
-function copyFiles(pathToFile, pathToCopy) {
-  fsp.readdir(path.join(pathToFile), {withFileTypes: true}, (err) => {if (err) console.log(err);}).then((files)=> {
+async function copyFiles(pathToFile, pathToCopy) {
+  await fsp.readdir(path.join(pathToFile), {withFileTypes: true}).then(async (files)=> {
     for (let file of files) {
       if (file.isDirectory()) {
-        fs.mkdir(path.join(pathToCopy, file.name), {recursive: true}, (err) => {
+        await fsp.mkdir(path.join(pathToCopy, file.name), {recursive: true}).catch((err) => {
           if (err) console.log(err);
-        })
-        copyFiles(path.join(pathToFile, file.name), path.join(pathToCopy, file.name));
+        });
+        await copyFiles(path.join(pathToFile, file.name), path.join(pathToCopy, file.name)).catch((err) => {
+          if (err) console.log(err);
+        });
       } else if (file.isFile()){
-        fs.copyFile(path.join(pathToFile, file.name), path.join(pathToCopy, file.name), (err) => {if (err) console.log(err)})
+        await fsp.copyFile(path.join(pathToFile, file.name), path.join(pathToCopy, file.name)).catch((err) => {
+          if (err) console.log(err);
+        });
       }
     }
+  }).catch((err) => {
+    if (err) console.log(err);
   })
 }
-copyFiles(currentDir, cloneDir);
 
+async function removeDistDir() {
+  await fsp.rm(path.join(__dirname, 'project-dist'), {recursive: true}).then(async ()=>{
+    await createFolders();
+  }).catch( async (err) => {
+    if (err) console.log('Folder is not exist');
+    await createFolders();
+  });
+}
 
-function mergeStyles () {
-  fs.readdir(path.join(__dirname, 'styles'), (err, files) => {
-    if(err) console.log(err);
+async function mergeStyles () {
+  await fsp.readdir(path.join(__dirname, 'styles')).then(async (files)=> {
     files.forEach(file => {
       if (file.split('.')[1] === 'css') {
         const input = fs.createReadStream(path.join(__dirname, 'styles', file), 'utf-8');
-        const output = fs.createWriteStream(path.join(__dirname, 'project-dist', 'style.css'));
-        input.on('data', chunk => fs.appendFile(path.join(__dirname, 'project-dist', 'style.css'), chunk, (err) => {
-          if (err) console.log(err);
-        }));
+        input.on('data', async chunk => await fsp.appendFile(path.join(__dirname, 'project-dist', 'style.css'), chunk));
       }
-  })})
-}
-mergeStyles ();
-
-function buildHtml() {
-  const readStreamTemplate = fs.createReadStream(path.join(__dirname, 'template.html'));
-  let htmlTemplate = '';
-
-  readStreamTemplate.on('data', (chunk) => {
-    htmlTemplate += chunk.toString();
-    fsp.appendFile(path.join(__dirname, 'project-dist', 'index.html'), chunk, (err) => {
-      if (err) console.log(err);
-    });
-  });
-
-  fs.readdir(path.join(__dirname, 'components'), (err, files) => {
-    if(err) console.log(err);
-    files.forEach(file => {
-    fs.readFile(path.join(__dirname, 'components', file), 'utf-8', (err, text) => {
-      if (err) console.log(err);
-      htmlTemplate = htmlTemplate.replace(`{{${file.slice(0, file.length - 5)}}}`, text);
-      fs.writeFile(path.join(__dirname, 'project-dist', 'index.html'), htmlTemplate, (err) => {
-        if (err) console.log(err);
-      });
-    });
-  });
+    })
+  }).catch((err) => {
+    if (err) console.log(err);
   });
 }
-buildHtml();
+
+async function buildHtml() {
+  let htmlTemplate = await fsp.readFile(path.join(__dirname, 'template.html'), 'utf-8');
+  const components = htmlTemplate.matchAll(/{{(.*?)}}/g);
+  for (let comp of components) {
+    const componentName = comp[1];
+    const htmlComponent = await fsp.readFile(path.join(__dirname, 'components', `${componentName}.html`), 'utf8');
+    htmlTemplate = htmlTemplate.replace(comp[0], htmlComponent);
+  }
+  await fsp.writeFile(path.join(__dirname, 'project-dist', 'index.html'), htmlTemplate);
+}
+
+async function executeAll() {
+  await removeDistDir();
+  await copyFiles(currentDir, cloneDir);
+  await mergeStyles();
+  await buildHtml();
+}
+
+executeAll();
